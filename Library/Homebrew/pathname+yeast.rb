@@ -1,39 +1,35 @@
-#  Copyright 2009 Max Howell <max@methylblue.com>
+#  Copyright 2009 Max Howell and other contributors.
 #
-#  This file is part of Homebrew.
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions
+#  are met:
 #
-#  Homebrew is free software: you can redistribute it and/or modify
-#  it under the terms of the GNU General Public License as published by
-#  the Free Software Foundation, either version 3 of the License, or
-#  (at your option) any later version.
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
 #
-#  Homebrew is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with Homebrew.  If not, see <http://www.gnu.org/licenses/>.
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+#  IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+#  OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+#  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+#  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+#  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+#  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+#  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+#  THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 require 'pathname'
 
 # we enhance pathname to make our code more readable
 class Pathname
-  def mv dst    
-    FileUtils.mv to_s, dst
-  end
-  
-  def rename newname
-    raise unless file?
-    dst=dirname+newname
-    dst.unlink if dst.exist?
-    mv dst
-  end
-
   def install src
     if src.is_a? Array
       src.collect {|src| install src }
-    elsif File.exist? src
+    else
+      raise "#{src} does not exist" unless File.exist? src
       mkpath
       if File.symlink? src
         # we use the BSD mv command because FileUtils copies the target and
@@ -44,8 +40,16 @@ class Pathname
         # this function when installing from the temporary build directory
         FileUtils.mv src, to_s
       end
-      return self+src
+      src=Pathname.new src
+      return self+src.basename
     end
+  end
+  
+  # we assume this pathname object is a file obviously
+  def write content
+    raise "Will not overwrite #{to_s}" if exist? and not ARGV.force?
+    dirname.mkpath
+    File.open(self, 'w') {|f| f.write content }
   end
 
   def cp dst
@@ -54,6 +58,7 @@ class Pathname
     else
       FileUtils.cp_r to_s, dst
     end
+    return dst
   end
 
   # extended to support the double extensions .tar.gz and .tar.bz2
@@ -73,8 +78,10 @@ class Pathname
   # instead rely on good ol' libc and the filesystem
   def rmdir_if_possible
     rmdir
+    true
   rescue SystemCallError => e
     raise unless e.errno == Errno::ENOTEMPTY::Errno or e.errno == Errno::EACCES::Errno
+    false
   end
   
   def chmod_R perms
@@ -83,7 +90,10 @@ class Pathname
   end
 
   def abv
-    `find #{to_s} -type f | wc -l`.strip+' files, '+`du -hd0 #{to_s} | cut -d"\t" -f1`.strip
+    out=''
+    n=`find #{to_s} -type f | wc -l`.to_i
+    out<<"#{n} files, " if n > 1
+    out<<`du -hd0 #{to_s} | cut -d"\t" -f1`.strip
   end
 
   def version
@@ -98,13 +108,14 @@ class Pathname
     # we only support numbered tagged downloads
     %r[github.com/.*/tarball/((\d\.)+\d)$].match to_s
     return $1 if $1
-    
+        
     # eg. boost_1_39_0
     /((\d+_)+\d+)$/.match stem
     return $1.gsub('_', '.') if $1
 
     # eg. foobar-4.5.1-1
-    /-((\d+\.)*\d+-\d+)$/.match stem
+    # eg. ruby-1.9.1-p243
+    /-((\d+\.)*\d\.\d+-p?\d+)$/.match stem
     return $1 if $1
 
     # eg. foobar-4.5.1
@@ -128,6 +139,8 @@ class Pathname
     stem.scan /_([^_]+)/ do |match|
       return match.first if /\d/.match $1
     end
+
+    nil
   end
 end
 
